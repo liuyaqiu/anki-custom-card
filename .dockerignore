@@ -1,0 +1,13 @@
+.git
+.gitignore
+.mise.toml
+.pytest_cache
+.ruff_cache
+.venv
+data
+docs
+htmlcov
+__pycache__
+*.pyc
+*.pyo
+

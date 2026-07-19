@@ -1,0 +1,42 @@
+services:
+  app:
+    build:
+      context: .
+      target: runtime
+    environment:
+      ACC_DATABASE_URL: sqlite:////app/data/app.db
+      ACC_DATA_DIR: /app/data
+      ACC_ENVIRONMENT: production
+      ACC_HOST: 127.0.0.1
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - app-data:/app/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          response = urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2);
+          assert response.status == 200;
+          assert json.load(response)['status'] == 'ok'
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  test:
+    profiles: ["test"]
+    build:
+      context: .
+      target: test
+    environment:
+      ACC_ENVIRONMENT: test
+    command: ["uv", "run", "pytest", "--cov", "--cov-report=term-missing"]
+
+volumes:
+  app-data:
+
