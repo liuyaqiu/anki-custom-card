@@ -2,8 +2,9 @@
 
 MISE := mise exec --
 UV := $(MISE) uv
+NPM := cd frontend && $(MISE) npm
 
-.PHONY: help setup sync lock test test-unit test-cov smoke-openai smoke-azure lint format format-check check run migrate \
+.PHONY: help setup sync lock frontend-install frontend-dev frontend-test frontend-typecheck frontend-build test test-unit test-cov smoke-openai smoke-azure smoke-anki lint format format-check check run migrate \
 	migration \
 	docker-build docker-up docker-down docker-logs docker-test
 
@@ -13,6 +14,22 @@ help: ## Show available project commands
 setup: ## Install mise tools and locked Python dependencies
 	mise install
 	$(UV) sync --locked
+	$(NPM) ci
+
+frontend-install: ## Install locked frontend dependencies
+	$(NPM) ci
+
+frontend-dev: ## Start the Vite development server with API proxying
+	$(NPM) run dev
+
+frontend-test: ## Run frontend unit tests
+	$(NPM) test
+
+frontend-typecheck: ## Type-check Vue and TypeScript sources
+	$(NPM) run typecheck
+
+frontend-build: ## Type-check and build the Vue SPA
+	$(NPM) run build
 
 sync: ## Synchronize the virtual environment from uv.lock
 	$(UV) sync --locked
@@ -35,6 +52,9 @@ smoke-openai: ## Run the explicitly enabled, billed OpenAI integration smoke tes
 smoke-azure: ## Run the explicitly enabled, billed Azure Speech smoke test
 	ACC_RUN_AZURE_SPEECH_SMOKE=1 $(UV) run pytest -m smoke tests/smoke/test_real_azure_speech.py
 
+smoke-anki: ## Check the local AnkiConnect endpoint without changing Anki data
+	ACC_RUN_ANKI_SMOKE=1 $(UV) run pytest -m smoke tests/smoke/test_real_anki_connect.py
+
 lint: ## Run Ruff lint checks
 	$(UV) run ruff check .
 
@@ -45,9 +65,9 @@ format: ## Format Python sources and tests
 format-check: ## Verify Python formatting without changing files
 	$(UV) run ruff format --check .
 
-check: lint format-check test-cov ## Run all local quality gates
+check: frontend-test frontend-build lint format-check test-cov ## Run all local quality gates
 
-run: ## Start the local development server
+run: migrate frontend-build ## Migrate, build the SPA, and start the local development server
 	$(UV) run uvicorn anki_custom_card.app:app --host 127.0.0.1 --port 8000 --reload
 
 migrate: ## Upgrade the configured database to the latest schema

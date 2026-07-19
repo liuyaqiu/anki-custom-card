@@ -12,8 +12,23 @@ class GenerationRepository:
     def __init__(self, session: Session) -> None:
         self.session = session
 
-    def create_job(self, input_word: str, language: str, *, now: datetime) -> GenerationJob:
-        job = GenerationJob(input_word=input_word, language=language, provider_config={})
+    def create_job(
+        self,
+        input_word: str,
+        language: str,
+        *,
+        now: datetime,
+        source_note_id: str | None = None,
+        request_key: str | None = None,
+        provider_config: dict[str, object] | None = None,
+    ) -> GenerationJob:
+        job = GenerationJob(
+            input_word=input_word,
+            language=language,
+            source_note_id=source_note_id,
+            request_key=request_key,
+            provider_config=provider_config or {},
+        )
         self.session.add(job)
         self.session.flush()
         return job

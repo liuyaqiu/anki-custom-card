@@ -30,14 +30,25 @@ class Settings(BaseSettings):
     azure_speech_output_format: str = "audio-24khz-96kbitrate-mono-mp3"
     azure_speech_rate: str = "-8%"
     azure_speech_config_version: str = "1"
+    anki_connect_url: str = "http://127.0.0.1:8765"
+    anki_connect_timeout_seconds: float = 10.0
+    anki_deck: str = "Anki Custom Card"
+    worker_enabled: bool = True
+    worker_poll_seconds: float = 1.0
+    worker_lease_seconds: int = 120
 
     @model_validator(mode="after")
-    def require_loopback_host(self) -> Self:
+    def require_local_host(self) -> Self:
         try:
-            is_loopback = ip_address(self.host).is_loopback
+            address = ip_address(self.host)
+            is_local = (address.is_loopback or address.is_private) and not (
+                address.is_unspecified or address.is_multicast or address.is_link_local
+            )
         except ValueError:
-            is_loopback = self.host == "localhost"
+            is_local = self.host == "localhost"
 
-        if not is_loopback:
-            raise ValueError("host must resolve to a loopback address in local mode")
+        if not is_local:
+            raise ValueError("host must be a loopback or explicit private LAN address")
+        if self.azure_speech_locale != "en-US" or not self.azure_speech_voice.startswith("en-US-"):
+            raise ValueError("Azure Speech must use an en-US locale and voice")
         return self

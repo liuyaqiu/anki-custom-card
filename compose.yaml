@@ -3,13 +3,14 @@ services:
     build:
       context: .
       target: runtime
+    env_file:
+      - .env
     environment:
       ACC_DATABASE_URL: sqlite:////app/data/app.db
       ACC_DATA_DIR: /app/data
       ACC_ENVIRONMENT: production
-      ACC_HOST: 127.0.0.1
-    ports:
-      - "127.0.0.1:8000:8000"
+      ACC_ANKI_CONNECT_URL: http://127.0.0.1:8765
+    network_mode: host
     volumes:
       - app-data:/app/data
     restart: unless-stopped
@@ -19,8 +20,10 @@ services:
         - python
         - -c
         - >-
-          import json, urllib.request;
-          response = urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=2);
+          import json, os, urllib.request;
+          host = os.environ.get('ACC_HOST', '127.0.0.1');
+          port = os.environ.get('ACC_PORT', '8000');
+          response = urllib.request.urlopen(f'http://{host}:{port}/api/health', timeout=2);
           assert response.status == 200;
           assert json.load(response)['status'] == 'ok'
       interval: 10s
@@ -39,4 +42,3 @@ services:
 
 volumes:
   app-data:
-

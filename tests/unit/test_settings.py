@@ -39,6 +39,16 @@ def test_openai_api_key_is_secret() -> None:
     assert settings.openai_api_key.get_secret_value() == "sk-example-secret"
 
 
-def test_settings_reject_non_loopback_host() -> None:
+def test_settings_allow_explicit_private_lan_host() -> None:
+    assert Settings(host="192.168.88.9").host == "192.168.88.9"
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "8.8.8.8", "example.com"])
+def test_settings_reject_unsafe_host(host: str) -> None:
     with pytest.raises(ValidationError, match="loopback"):
-        Settings(host="0.0.0.0")
+        Settings(host=host)
+
+
+def test_settings_reject_non_american_speech_voice() -> None:
+    with pytest.raises(ValidationError, match="en-US"):
+        Settings(azure_speech_locale="en-GB", azure_speech_voice="en-GB-SoniaNeural")

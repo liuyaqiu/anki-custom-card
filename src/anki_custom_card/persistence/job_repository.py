@@ -107,8 +107,9 @@ class JobRepository:
         error: str,
         retry_at: datetime,
         now: datetime,
+        retryable: bool = True,
     ) -> Job:
-        terminal = Job.attempts >= Job.max_attempts
+        terminal = (Job.attempts >= Job.max_attempts) | (not retryable)
         statement = (
             update(Job)
             .where(
@@ -131,8 +132,30 @@ class JobRepository:
         )
         return self._owned_result(statement, job_id, worker_id)
 
+    def retry_failed(self, job_id: str, *, now: datetime) -> Job:
+        statement = (
+            update(Job)
+            .where(Job.id == job_id, Job.status == "failed")
+            .values(
+                status="pending",
+                attempts=0,
+                available_at=now,
+                last_error=None,
+                locked_by=None,
+                locked_at=None,
+                lease_expires_at=None,
+                updated_at=now,
+            )
+            .returning(Job)
+        )
+        job = self.session.scalars(statement).one_or_none()
+        if job is None:
+            raise ValueError(f"Job {job_id} is not failed")
+        return job
+
     def _owned_result(self, statement: object, job_id: str, worker_id: str) -> Job:
         job = self.session.scalars(statement).one_or_none()  # type: ignore[arg-type]
         if job is None:
             raise JobLeaseLostError(f"worker {worker_id} does not own running job {job_id}")
+        self.session.refresh(job)
         return job

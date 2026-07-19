@@ -4,10 +4,11 @@
 .pytest_cache
 .ruff_cache
 .venv
+frontend/node_modules
+frontend/dist
 data
 docs
 htmlcov
 __pycache__
 *.pyc
 *.pyo
-

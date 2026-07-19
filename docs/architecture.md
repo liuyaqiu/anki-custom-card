@@ -41,14 +41,14 @@
 - Pydantic：API 与 Provider 边界的数据结构。
 - SQLAlchemy 2.x 和 Alembic：持久化与数据库迁移。
 - SQLite：本地业务数据和任务状态。
-- Jinja2 加少量渐进增强 JavaScript：首版管理界面。
+- Vue 3、TypeScript、Vite、Vue Router 和 TanStack Query：唯一的本地管理界面。
 - 应用内后台任务执行器：处理生成和发布；任务必须持久化到 SQLite。
 - AnkiConnect：Anki Note、Note Type 和媒体发布。
 - OpenAI Responses API：默认使用 `gpt-5.6-luna` 和 Structured Outputs 生成结构化草稿。
 - Azure AI Speech：使用神经语音和 SSML 生成单词及例句音频。
 - 获得持久化授权的第三方词典 API：提供词义、词性、音标、词形和来源 sense；具体供应商通过 Provider 配置选择。
 
-若前端后续变复杂，可独立为 SPA；领域模型和 HTTP API 不依赖这一选择。
+SPA 与 FastAPI 同源部署在 `/app/`，只通过 `/api` 读写数据；Provider 密钥不会进入浏览器。TanStack Query 对 active generation/job 做有限轮询，终态后停止并失效相关缓存。生产镜像在 Node 构建阶段生成静态文件，Python 运行阶段不包含 Node。
 
 ## 4. 模块划分
 
@@ -405,11 +405,11 @@ Extra
 
 `SourceId` 是稳定幂等标识，`Domain`、`Collocations` 和 `UsageNotes` 支持职场/IT 学习，两个音频字段分别允许复习单词和完整例句。字段只保存数据；HTML 结构和展示逻辑集中在模板中。
 
-模板遵循 Anki 的常见 Basic 结构：正面突出 `Word`、词性、音标和单词音频；背面先使用 `{{FrontSide}}`，再展示英文释义、简短中文释义、例句、翻译、搭配、用法提示和例句音频。共享 CSS 使用 `.card` 作为根样式，采用系统字体、有限宽度、响应式间距和 `nightMode` 兼容，不依赖外部网络资源或复杂 JavaScript。
+模板遵循 Anki 的常见 Basic 结构：正面内容在复习区域水平、垂直居中，展示 `Word`、词性、美式音标、单词音频、英文例句和例句音频，刻意隐藏例句中文翻译；背面使用独立答案布局，不嵌入 `{{FrontSide}}`，仅展示英文释义、简短中文释义、例句答案、翻译、搭配和用法提示，避免在答案页重复整块正面内容。共享 CSS 使用 `.card` 作为根样式，采用系统字体、有限宽度、响应式间距和 `nightMode` 兼容，不依赖外部网络资源或复杂 JavaScript。
 
-模板、CSS 和字段 schema 在代码中明确版本。升级模板必须有显式迁移，不在每次发布时无条件覆盖用户环境。Anki 官方模板采用字段替换的 HTML 和共享 CSS，本设计保持这一惯例。
+模板、CSS 和字段 schema 在代码中明确版本。模板只在创建 Note Type 或用户显式执行模板同步时写入 Anki；普通发布不会无条件覆盖模板。同步操作只接受服务内 CSRF 保护的请求，并先校验字段 schema 兼容性。Anki 官方模板采用字段替换的 HTML 和共享 CSS，本设计保持这一惯例。
 
-Web 预览使用与 Anki 模板共享的内容结构和 CSS，但只承诺语义接近；最终渲染仍以 Anki 为准，尤其是音频和 Anki 特有行为。
+Web 预览由服务端使用与 Anki 发布完全相同的字段映射、HTML 模板和 CSS 生成，媒体通过只读 Note 关联端点加载。预览不执行 Anki 专有脚本，因此最终音频控件外观和客户端特有行为仍以 Anki 为准。
 
 ## 9. 事务与可靠性
 
@@ -446,13 +446,13 @@ worker:
 
 ## 10. 安全与本地运行
 
-- 默认绑定 `127.0.0.1`，不默认暴露到局域网。
+- 默认绑定 `127.0.0.1`，不默认暴露到局域网；配置明确的 RFC 1918 私网地址可选择性启用受信任局域网访问，拒绝通配和公网监听。
 - Provider API Key 不写入 Note、artifact 原始响应或前端日志。
 - 日志对密钥、请求头和敏感内容脱敏。
 - 媒体路径由服务生成，拒绝路径穿越和任意本地文件读取。
 - 限制媒体大小并校验实际文件类型。
 - 即使首版不登录，状态变更 API 也应考虑 CSRF 防护。
-- 未来非 localhost 访问应作为独立部署模式增加认证、HTTPS 和本地 Agent，而不是简单开放监听地址。
+- 当前私网监听是单用户可信局域网模式，不提供认证；若扩展到不可信网络或远程访问，必须增加认证、HTTPS 和本地 Agent。
 
 ## 11. 可观测性与运维
 

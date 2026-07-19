@@ -76,7 +76,7 @@ class NoteRepository:
         next_version = expected_version + 1
         result = self.session.execute(
             update(Note)
-            .where(Note.id == note_id, Note.version == expected_version)
+            .where(Note.id == note_id, Note.version == expected_version, Note.status == "active")
             .values(**changed_values, version=next_version)
         )
         if result.rowcount != 1:

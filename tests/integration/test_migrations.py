@@ -18,11 +18,17 @@ def test_initial_migration_builds_expected_schema(tmp_path: Path) -> None:
     command.upgrade(config, "head")
 
     engine = build_engine(f"sqlite:///{database_path}")
-    table_names = set(inspect(engine).get_table_names())
+    inspector = inspect(engine)
+    table_names = set(inspector.get_table_names())
+    generation_columns = {item["name"] for item in inspector.get_columns("generation_jobs")}
+    generation_uniques = {
+        item["name"] for item in inspector.get_unique_constraints("generation_jobs")
+    }
     engine.dispose()
 
     assert {
         "alembic_version",
+        "anki_publications",
         "artifacts",
         "dictionary_cache_entries",
         "drafts",
@@ -34,12 +40,15 @@ def test_initial_migration_builds_expected_schema(tmp_path: Path) -> None:
         "notes",
         "speech_cache_entries",
     } <= table_names
+    assert "request_key" in generation_columns
+    assert "uq_generation_jobs_request_key" in generation_uniques
 
     command.downgrade(config, "base")
     engine = build_engine(f"sqlite:///{database_path}")
     assert not (
         {
             "artifacts",
+            "anki_publications",
             "dictionary_cache_entries",
             "drafts",
             "generation_jobs",

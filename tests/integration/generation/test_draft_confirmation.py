@@ -15,7 +15,14 @@ from anki_custom_card.persistence.draft_repository import (
 )
 from anki_custom_card.persistence.generation_repository import GenerationRepository
 from anki_custom_card.persistence.media_repository import MediaRepository
-from anki_custom_card.persistence.models import Artifact, Base, NoteMedia, NoteRevision
+from anki_custom_card.persistence.models import (
+    AnkiPublication,
+    Artifact,
+    Base,
+    Job,
+    NoteMedia,
+    NoteRevision,
+)
 from anki_custom_card.persistence.note_repository import NoteRepository
 
 pytestmark = pytest.mark.integration
@@ -94,6 +101,11 @@ def test_draft_edit_uses_optimistic_version_and_confirmation_is_atomic(tmp_path:
         assert session.get(NoteRevision, (note.id, 1)) is not None
         assert session.scalar(select(func.count()).select_from(NoteMedia)) == 2
         assert DraftRepository(session).get(draft.id).status == "confirmed"  # type: ignore[union-attr]
+        assert session.get(AnkiPublication, note.id).status == "pending"  # type: ignore[union-attr]
+        publish_job = session.scalar(select(Job).where(Job.aggregate_id == note.id))
+        assert publish_job is not None
+        assert publish_job.job_type == "publish"
+        assert publish_job.target_version == 1
     engine.dispose()
 
 
@@ -131,4 +143,6 @@ def test_confirming_regenerated_draft_updates_existing_note(tmp_path: Path) -> N
         assert updated.id == note.id
         assert updated.version == 2
         assert session.get(NoteRevision, (note.id, 2)) is not None
+        publish_job = session.scalar(select(Job).where(Job.aggregate_id == note.id))
+        assert publish_job is not None and publish_job.target_version == 2
     engine.dispose()

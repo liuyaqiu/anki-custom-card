@@ -1,5 +1,13 @@
 # syntax=docker/dockerfile:1.7
 
+FROM node:24.18.0-slim AS frontend-build
+
+WORKDIR /frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend ./
+RUN npm run build
+
 FROM python:3.12.13-slim AS base
 
 COPY --from=ghcr.io/astral-sh/uv:0.11.29 /uv /uvx /bin/
@@ -13,6 +21,7 @@ WORKDIR /app
 
 COPY pyproject.toml uv.lock README.md alembic.ini ./
 COPY src ./src
+COPY --from=frontend-build /frontend/dist ./src/anki_custom_card/spa_dist
 COPY migrations ./migrations
 COPY --chmod=755 docker/entrypoint.sh /app/docker/entrypoint.sh
 

@@ -9,6 +9,7 @@ from anki_custom_card.domain.notes import NoteCreate, NoteUpdate
 from anki_custom_card.generation.schemas import CardDraft
 from anki_custom_card.persistence.models import Artifact, Draft, Note, NoteMedia
 from anki_custom_card.persistence.note_repository import NoteRepository
+from anki_custom_card.publishing.commands import request_publish
 
 
 class DraftConflictError(RuntimeError):
@@ -58,7 +59,7 @@ class DraftRepository:
         *,
         expected_version: int,
         expected_note_version: int | None = None,
-        domain: Literal["general", "workplace", "it"],
+        domain: Literal["general", "workplace", "it"] | None,
         now: datetime,
     ) -> Note:
         draft = self.get(draft_id)
@@ -67,7 +68,7 @@ class DraftRepository:
         content = CardDraft.model_validate(draft.content)
         fields = content.fields
         note_values = {
-            "domain": domain,
+            "domain": fields.domain if domain is None else domain,
             "part_of_speech": fields.part_of_speech,
             "source_sense_ids": content.selected_sense_ids,
             "definition_en": fields.definition_en,
@@ -133,5 +134,6 @@ class DraftRepository:
         )
         if result.rowcount != 1:
             raise DraftConflictError(f"Draft {draft_id} changed during confirmation")
+        request_publish(self.session, note.id, note.version, now=now)
         self.session.flush()
         return note

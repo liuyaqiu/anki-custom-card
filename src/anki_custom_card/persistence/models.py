@@ -79,6 +79,9 @@ class Note(TimestampMixin, Base):
     media_links: Mapped[list[NoteMedia]] = relationship(
         back_populates="note", cascade="all, delete-orphan", passive_deletes=True
     )
+    publication: Mapped[AnkiPublication | None] = relationship(
+        back_populates="note", cascade="all, delete-orphan", passive_deletes=True, uselist=False
+    )
 
 
 class NoteRevision(Base):
@@ -100,6 +103,7 @@ class NoteRevision(Base):
 
 class GenerationJob(TimestampMixin, Base):
     __tablename__ = "generation_jobs"
+    __table_args__ = (UniqueConstraint("request_key", name="uq_generation_jobs_request_key"),)
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     input_word: Mapped[str] = mapped_column(String(512), nullable=False)
@@ -107,6 +111,7 @@ class GenerationJob(TimestampMixin, Base):
     source_note_id: Mapped[str | None] = mapped_column(
         ForeignKey("notes.id", ondelete="CASCADE"), index=True
     )
+    request_key: Mapped[str | None] = mapped_column(String(64))
     status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
     provider_config: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(128))
@@ -292,3 +297,35 @@ class Job(TimestampMixin, Base):
     locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     lease_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_error: Mapped[str | None] = mapped_column(Text)
+
+
+class AnkiPublication(Base):
+    __tablename__ = "anki_publications"
+    __table_args__ = (
+        CheckConstraint("attempt_count >= 0", name="ck_anki_publications_attempt_nonnegative"),
+    )
+
+    note_id: Mapped[str] = mapped_column(
+        ForeignKey("notes.id", ondelete="CASCADE"), primary_key=True
+    )
+    anki_note_id: Mapped[int | None] = mapped_column(Integer, unique=True)
+    target_deck: Mapped[str] = mapped_column(String(256), nullable=False)
+    target_note_type: Mapped[str] = mapped_column(String(256), nullable=False)
+    published_version: Mapped[int | None] = mapped_column(Integer)
+    publishing_version: Mapped[int | None] = mapped_column(Integer)
+    published_hash: Mapped[str | None] = mapped_column(String(64))
+    observed_anki_hash: Mapped[str | None] = mapped_column(String(64))
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    last_error_code: Mapped[str | None] = mapped_column(String(128))
+    last_error_message: Mapped[str | None] = mapped_column(Text)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.current_timestamp(),
+        onupdate=func.current_timestamp(),
+        nullable=False,
+    )
+
+    note: Mapped[Note] = relationship(back_populates="publication")

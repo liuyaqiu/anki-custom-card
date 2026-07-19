@@ -72,6 +72,12 @@ class MediaRepository:
         self.session.flush()
         return paths
 
-    def delete_files(self, relative_paths: list[str]) -> None:
+    @staticmethod
+    def delete_files_from_store(
+        store: ContentAddressedMediaStore, relative_paths: list[str]
+    ) -> None:
         for relative_path in relative_paths:
-            self.store.delete(relative_path)
+            store.delete(relative_path)
+
+    def delete_files(self, relative_paths: list[str]) -> None:
+        self.delete_files_from_store(self.store, relative_paths)

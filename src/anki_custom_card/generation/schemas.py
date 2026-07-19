@@ -59,6 +59,7 @@ class DictionaryOutput(StrictSchema):
 
 class CardFields(StrictSchema):
     word: NonEmptyText
+    domain: Literal["general", "workplace", "it"] = "general"
     part_of_speech: NonEmptyText
     ipa: str | None = None
     definition_en: NonEmptyText

@@ -1,8 +1,8 @@
 [tools]
 python = "3.12.13"
 uv = "0.11.29"
+node = "24.18.0"
 
 [env]
 _.python.venv = { path = ".venv", create = true }
 ACC_ENVIRONMENT = "development"
-

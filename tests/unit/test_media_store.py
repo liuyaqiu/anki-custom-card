@@ -38,3 +38,11 @@ def test_media_store_rejects_paths_outside_root(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="unsafe media path"):
         store.delete("../outside.mp3")
+
+
+def test_media_store_enforces_size_and_rejects_known_signature_mismatch(tmp_path: Path) -> None:
+    store = ContentAddressedMediaStore(tmp_path, max_bytes=8)
+    with pytest.raises(ValueError, match="exceeds"):
+        store.put(b"123456789", media_type="audio", mime_type="audio/mpeg")
+    with pytest.raises(ValueError, match="signature"):
+        store.put(b"\x89PNG\r\n\x1a\n", media_type="audio", mime_type="audio/mpeg")

@@ -115,6 +115,9 @@ async def test_card_composer_receives_explicit_dictionary_json() -> None:
     call = parse.await_args.kwargs
     assert call["text_format"] is CardDraft
     assert '"sense_id":"noun.it.release"' in call["input"]
+    assert '"candidate_index":0' in call["input"]
+    assert '"english_variant":"en-US"' in call["input"]
+    assert "general american" in call["instructions"].lower()
     assert call["previous_response_id"] is None
 
 
