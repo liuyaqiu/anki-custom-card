@@ -184,4 +184,8 @@ make docker-test
 make docker-down
 ```
 
+Compose 将数据库和媒体保存在仓库的 `data/` 目录。迁移到另一台机器时需要在应用
+停止后复制整个 `data/`；仅复制 Git 跟踪的文件不会包含 Notes。旧版 Compose
+命名卷的迁移步骤及一致性备份方法见 [运维与恢复](docs/operations.md)。
+
 环境变量示例见 `.env.example`，实施进度见 [实施记录](docs/implementation.md)。服务默认只通过宿主机的 `127.0.0.1:8000` 暴露。若需要从可信局域网访问，可设置例如 `ACC_HOST=192.168.88.9` 后执行 `docker compose up -d --build app`；Compose 不再覆盖该值。出于安全考虑，服务拒绝公网地址、主机名和 `0.0.0.0`，且当前没有用户认证，不应暴露到不可信网络。

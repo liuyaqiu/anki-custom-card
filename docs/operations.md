@@ -11,6 +11,17 @@ data/app.db
 data/media/
 ```
 
+Docker Compose 也将仓库中的 `data/` 绑定到容器的 `/app/data`，而不是使用位于
+Docker 内部、复制仓库时不会被带走的命名卷。因此迁移机器时必须复制完整的
+`data/` 目录；仅 `git clone` 不会恢复业务数据，因为 `data/` 有意不纳入 Git。
+
+Compose 默认以宿主机常见的 `1000:1000` 用户运行。若你的用户 ID 不同，在 `.env`
+中设置 `ACC_UID` 和 `ACC_GID`（可分别用 `id -u`、`id -g` 查询），确保容器可写
+`data/`。
+
+容器将 uv 缓存放在可写的 `/tmp/uv-cache`，避免该 UID 在镜像内没有 home
+目录时尝试写入 `/.cache`。
+
 ## 一致性备份
 
 最简单可靠的方法是先停止所有 Web/worker 进程，确认没有进程写入 `data/`，再复制整个目录。SQLite 使用 WAL，因此不要只复制正在运行时的 `app.db` 而忽略 `app.db-wal`。离线复制整个 `data/` 可以同时覆盖数据库与媒体的一致时间点。
@@ -19,20 +30,37 @@ Docker Compose 部署可执行：
 
 ```bash
 docker compose stop app
-docker run --rm \
-  -v anki-custom-card_app-data:/source:ro \
-  -v "$PWD/backups:/backup" \
-  alpine tar -C /source -czf /backup/anki-custom-card-data.tar.gz .
+tar -C data -czf backups/anki-custom-card-data.tar.gz .
 docker compose start app
 ```
 
-卷名可能受 Compose project name 影响，应先用 `docker volume ls` 确认精确名称。备份文件应限制读取权限，并定期复制到另一块磁盘。
+应预先创建 `backups/`，限制备份文件的读取权限，并定期复制到另一块磁盘。
+
+### 从旧版 Docker 命名卷迁移
+
+旧版 Compose 使用名为 `app-data` 的命名卷。升级配置前，先把卷中数据复制到
+仓库的 `data/`；否则新配置会看到一个空的绑定目录。保持应用停止，并将下面的
+卷名替换为 `docker volume ls` 显示的实际名称：
+
+```bash
+docker compose stop app
+mkdir -p data
+docker run --rm \
+  -e TARGET_UID="$(id -u)" \
+  -e TARGET_GID="$(id -g)" \
+  -v anki-custom-card_app-data:/source:ro \
+  -v "$PWD/data:/target" \
+  alpine sh -c 'cp -R /source/. /target/ && chown -R "$TARGET_UID:$TARGET_GID" /target'
+docker compose up -d app
+```
+
+迁移完成并确认 Notes、媒体均正常后，旧命名卷可保留一段时间作为恢复副本。
 
 ## 恢复验证
 
-恢复应先在隔离目录或新 Docker volume 中演练：
+恢复应先在隔离目录或临时数据目录中演练：
 
-1. 保持服务停止，将完整归档解压到空的数据目录。
+1. 保持服务停止，将完整归档解压到仓库的空 `data/` 目录。
 2. 检查数据库和媒体文件的所有者、权限及路径。
 3. 运行 `make migrate`，只执行向前兼容的缺失迁移。
 4. 运行 `make check`，启动服务并检查 `/api/health` 与 `/api/health/anki`。

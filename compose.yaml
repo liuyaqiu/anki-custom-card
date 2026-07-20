@@ -10,9 +10,14 @@ services:
       ACC_DATA_DIR: /app/data
       ACC_ENVIRONMENT: production
       ACC_ANKI_CONNECT_URL: http://127.0.0.1:8765
+      # A host UID may not have a home directory inside the image.
+      UV_CACHE_DIR: /tmp/uv-cache
     network_mode: host
+    user: "${ACC_UID:-1000}:${ACC_GID:-1000}"
     volumes:
-      - app-data:/app/data
+      # Keep the authoritative database and media beside the repository so a
+      # complete repository-directory backup can be restored on another host.
+      - ./data:/app/data
     restart: unless-stopped
     healthcheck:
       test:
@@ -39,6 +44,3 @@ services:
     environment:
       ACC_ENVIRONMENT: test
     command: ["uv", "run", "pytest", "--cov", "--cov-report=term-missing"]
-
-volumes:
-  app-data:
