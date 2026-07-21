@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
-import { reactive, ref, watch } from 'vue'
+import { reactive, ref, toRaw, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { api } from '../api'
@@ -22,7 +22,9 @@ watch(draft.data, (value) => {
 }, { immediate: true })
 
 function content(): CardDraft {
-  const current = structuredClone(draft.data.value!.content)
+  // Vue Query exposes cached data through a reactive Proxy, which the browser's
+  // structured clone algorithm rejects. Unwrap it before making an editable copy.
+  const current = structuredClone(toRaw(draft.data.value!.content))
   current.word = form.word
   current.fields = { ...current.fields, word: form.word, part_of_speech: form.part_of_speech, ipa: form.ipa || null, definition_en: form.definition_en, definition_zh: form.definition_zh, example: form.example, example_zh: form.example_zh, collocations: form.collocations.split(';').map((item) => item.trim()).filter(Boolean), usage_note: form.usage_note || null }
   current.speech = { word_text: form.word, example_text: form.example }
