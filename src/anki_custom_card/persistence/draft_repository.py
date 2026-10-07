@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from anki_custom_card.domain.notes import NoteCreate, NoteUpdate
 from anki_custom_card.generation.schemas import CardDraft
-from anki_custom_card.persistence.models import Artifact, Draft, Note, NoteMedia
+from anki_custom_card.persistence.models import Artifact, Draft, Job, Note, NoteMedia
 from anki_custom_card.persistence.note_repository import NoteRepository
 from anki_custom_card.publishing.commands import request_publish
 
@@ -65,6 +65,15 @@ class DraftRepository:
         draft = self.get(draft_id)
         if draft is None or draft.version != expected_version or draft.status != "editable":
             raise DraftConflictError(f"Draft {draft_id} is stale or no longer editable")
+        active_generation = self.session.scalar(
+            select(Job.id).where(
+                Job.job_type == "generate",
+                Job.aggregate_id == draft.generation_job_id,
+                Job.status.in_(("pending", "running")),
+            )
+        )
+        if draft.generation_job.status != "succeeded" or active_generation is not None:
+            raise DraftConflictError(f"Draft {draft_id} is still being generated")
         content = CardDraft.model_validate(draft.content)
         fields = content.fields
         note_values = {

@@ -19,6 +19,45 @@ class ArchivedNoteRequiredError(ValueError):
     pass
 
 
+class GenerationDeletionConflictError(ValueError):
+    pass
+
+
+class GenerationDeletionService:
+    """Remove a generation candidate and data exclusively owned by it."""
+
+    def __init__(
+        self,
+        session_factory: sessionmaker[Session],
+        media_store: ContentAddressedMediaStore,
+    ) -> None:
+        self.session_factory = session_factory
+        self.media_store = media_store
+
+    def delete(self, generation_id: str) -> None:
+        with self.session_factory.begin() as session:
+            generation = session.get(GenerationJob, generation_id)
+            if generation is None:
+                raise NoteNotFoundError(generation_id)
+            running_job = session.scalar(
+                select(Job.id).where(
+                    Job.aggregate_id == generation_id,
+                    Job.status == "running",
+                )
+            )
+            if generation.status == "running" or running_job is not None:
+                raise GenerationDeletionConflictError(
+                    "A generation cannot be deleted while it is running"
+                )
+
+            session.execute(delete(Job).where(Job.aggregate_id == generation_id))
+            session.delete(generation)
+            session.flush()
+            paths = MediaRepository(session, self.media_store).delete_unreferenced()
+
+        MediaRepository.delete_files_from_store(self.media_store, paths)
+
+
 class NoteDeletionService:
     """Permanently remove an archived Note and data exclusively owned by it."""
 

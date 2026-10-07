@@ -2,7 +2,7 @@ from ipaddress import ip_address
 from pathlib import Path
 from typing import Self
 
-from pydantic import SecretStr, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -34,6 +34,7 @@ class Settings(BaseSettings):
     anki_connect_timeout_seconds: float = 10.0
     anki_deck: str = "Anki Custom Card"
     worker_enabled: bool = True
+    worker_count: int = Field(default=1, ge=1, le=16)
     worker_poll_seconds: float = 1.0
     worker_lease_seconds: int = 120
 

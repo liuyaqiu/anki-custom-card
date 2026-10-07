@@ -29,6 +29,13 @@ def test_settings_use_safe_local_defaults(monkeypatch: pytest.MonkeyPatch) -> No
     assert settings.database_url == "sqlite:///data/app.db"
     assert settings.openai_api_key is None
     assert settings.openai_model == "gpt-5.6-luna"
+    assert settings.worker_count == 1
+
+
+@pytest.mark.parametrize("count", [0, 17])
+def test_worker_count_is_bounded(count: int) -> None:
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, worker_count=count)
 
 
 def test_openai_api_key_is_secret() -> None:

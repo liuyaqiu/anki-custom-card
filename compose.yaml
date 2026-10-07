@@ -10,6 +10,8 @@ services:
       ACC_DATA_DIR: /app/data
       ACC_ENVIRONMENT: production
       ACC_ANKI_CONNECT_URL: http://127.0.0.1:8765
+      ACC_WORKER_COUNT: ${ACC_WORKER_COUNT:-3}
+      ACC_WORKER_LEASE_SECONDS: ${ACC_WORKER_LEASE_SECONDS:-600}
       # A host UID may not have a home directory inside the image.
       UV_CACHE_DIR: /tmp/uv-cache
     network_mode: host

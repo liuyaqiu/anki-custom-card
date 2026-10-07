@@ -13,7 +13,7 @@ from anki_custom_card.media.store import ContentAddressedMediaStore
 from anki_custom_card.persistence.database import build_engine
 from anki_custom_card.persistence.job_repository import JobRepository
 from anki_custom_card.persistence.media_repository import MediaRepository
-from anki_custom_card.persistence.models import AnkiPublication, Base, Note
+from anki_custom_card.persistence.models import AnkiPublication, Base, GenerationJob, Job, Note
 from anki_custom_card.persistence.note_repository import NoteRepository
 from anki_custom_card.publishing.commands import (
     request_archive,
@@ -161,6 +161,39 @@ async def test_publish_is_idempotent_and_updates_a_new_version(
         assert publication is not None
         assert publication.status == "published"
         assert publication.published_version == 2
+
+
+@pytest.mark.anyio
+async def test_publish_does_not_change_other_running_generation(
+    engine: Engine, tmp_path: Path
+) -> None:
+    store = ContentAddressedMediaStore(tmp_path / "media")
+    note_id = create_note(engine, store)
+    factory = sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    with factory.begin() as session:
+        generation = GenerationJob(input_word="deploy", language="en", status="running")
+        session.add(generation)
+        session.flush()
+        generation_id = generation.id
+        session.add(
+            Job(
+                job_type="generate",
+                aggregate_id=generation_id,
+                status="running",
+                available_at=now,
+                locked_by="other-worker",
+                lease_expires_at=now + timedelta(minutes=2),
+            )
+        )
+
+    await PublicationService(factory, FakeAnki(), store).publish(note_id, 1)
+
+    with factory() as session:
+        assert session.get(AnkiPublication, note_id).status == "published"  # type: ignore[union-attr]
+        assert session.get(GenerationJob, generation_id).status == "running"  # type: ignore[union-attr]
+        job = session.query(Job).filter_by(aggregate_id=generation_id).one()
+        assert job.status == "running"
 
 
 @pytest.mark.anyio

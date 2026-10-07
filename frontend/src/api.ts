@@ -60,6 +60,8 @@ export const api = {
   regenerate: (id: string) =>
     request<{ generation_id: string }>(`/api/notes/${id}/regenerate`, { method: 'POST' }),
   generation: (id: string) => request<Generation>(`/api/generations/${id}`),
+  deleteGeneration: (id: string) =>
+    request<void>(`/api/generations/${id}`, { method: 'DELETE' }),
   regenerateWord: (word: string) =>
     request<{ generation_ids: string[] }>(`/api/words/${encodeURIComponent(word)}/regenerate`, {
       method: 'POST',

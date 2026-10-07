@@ -1,5 +1,7 @@
+import asyncio
 from collections.abc import Callable
 from datetime import datetime
+from weakref import WeakValueDictionary
 
 from sqlalchemy.orm import Session
 
@@ -24,13 +26,14 @@ class GenerationPipeline:
         self.dictionary_provider = dictionary_provider
         self.card_composer = card_composer
         self.speech_service = speech_service
+        self._dictionary_locks: WeakValueDictionary[str, asyncio.Lock] = WeakValueDictionary()
 
     async def run(self, job_id: str, *, word_idx: int, domain: str, now: datetime) -> CardDraft:
         with self.session_factory() as session:
             repository = GenerationRepository(session)
             existing_draft = repository.load_draft(job_id)
+            repository.mark_running(job_id, now=now)
             if existing_draft is None:
-                repository.mark_running(job_id, now=now)
                 job = repository.get_job(job_id)
                 query = DictionaryQuery(
                     word=job.input_word,
@@ -70,6 +73,9 @@ class GenerationPipeline:
 
     async def _generate_speech(self, job_id: str, draft: CardDraft, now: datetime) -> CardDraft:
         if self.speech_service is None:
+            with self.session_factory() as session:
+                GenerationRepository(session).mark_succeeded(job_id, now=now)
+                session.commit()
             return draft
         try:
             await self.speech_service.generate(
@@ -100,6 +106,17 @@ class GenerationPipeline:
             schema_version=self.dictionary_provider.schema_version,
             model=self.dictionary_provider.model,
         )
+        lock = self._dictionary_locks.setdefault(identity.request_key, asyncio.Lock())
+        async with lock:
+            return await self._load_or_fetch_dictionary(job_id, query, identity, now)
+
+    async def _load_or_fetch_dictionary(
+        self,
+        job_id: str,
+        query: DictionaryQuery,
+        identity: DictionaryCacheIdentity,
+        now: datetime,
+    ) -> DictionaryOutput:
         with self.session_factory() as session:
             cached = DictionaryCacheRepository(session).get(identity.request_key)
             if cached is not None:

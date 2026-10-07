@@ -485,6 +485,7 @@ GET    /api/notes/{id}
 PATCH  /api/notes/{id}
 POST   /api/notes/{id}/archive
 DELETE /api/notes/{id}                 # only after archived; explicit hard delete
+DELETE /api/generations/{id}           # delete a generation candidate and its draft
 POST   /api/notes/{id}/publish
 POST   /api/notes/{id}/inspect-anki
 

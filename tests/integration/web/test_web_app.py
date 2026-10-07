@@ -10,7 +10,7 @@ from sqlalchemy.orm import sessionmaker
 
 from anki_custom_card.app import create_app
 from anki_custom_card.config import Settings
-from anki_custom_card.deletion import NoteDeletionService
+from anki_custom_card.deletion import GenerationDeletionService, NoteDeletionService
 from anki_custom_card.generation.schemas import CardDraft
 from anki_custom_card.media.store import ContentAddressedMediaStore
 from anki_custom_card.persistence.database import build_engine
@@ -62,6 +62,7 @@ class ServicesStub:
         )
         self.sessions = sessionmaker(engine, expire_on_commit=False)
         self.media_store = ContentAddressedMediaStore(tmp_path / "media")
+        self.generation_deletion = GenerationDeletionService(self.sessions, self.media_store)
         self.note_deletion = NoteDeletionService(self.sessions, self.media_store)
         self.worker = WorkerStub()
         self.anki = AnkiTemplateStub()
@@ -158,6 +159,52 @@ def test_generation_is_idempotent_and_immediately_visible_in_words_api(web_app) 
     with services.sessions() as session:
         assert len(list(session.scalars(select(GenerationJob)))) == 3
         assert len(list(session.scalars(select(Job)))) == 3
+
+
+def test_generation_candidate_can_be_deleted(web_app) -> None:
+    client, services = web_app
+    token = csrf(client)
+    headers = {"X-CSRF-Token": token}
+    draft_id = create_draft(services)
+    with services.sessions() as session:
+        generation_id = session.get(Draft, draft_id).generation_job_id  # type: ignore[union-attr]
+
+    assert client.delete(f"/api/generations/{generation_id}").status_code == 403
+    with services.sessions.begin() as session:
+        session.get(GenerationJob, generation_id).status = "running"  # type: ignore[union-attr]
+    assert client.delete(f"/api/generations/{generation_id}", headers=headers).status_code == 409
+    with services.sessions.begin() as session:
+        session.get(GenerationJob, generation_id).status = "succeeded"  # type: ignore[union-attr]
+    assert client.delete(f"/api/generations/{generation_id}", headers=headers).status_code == 204
+    assert client.get(f"/api/drafts/{draft_id}").status_code == 404
+    assert client.get("/api/words/deployment").status_code == 404
+    assert client.delete(f"/api/generations/{generation_id}", headers=headers).status_code == 404
+
+
+def test_draft_confirmation_rejects_active_generation(web_app) -> None:
+    client, services = web_app
+    headers = {"X-CSRF-Token": csrf(client)}
+    draft_id = create_draft(services)
+    with services.sessions.begin() as session:
+        draft = session.get(Draft, draft_id)
+        assert draft is not None
+        session.add(
+            Job(
+                job_type="generate",
+                aggregate_id=draft.generation_job_id,
+                status="running",
+                available_at=datetime.now(UTC),
+            )
+        )
+    response = client.get(f"/api/drafts/{draft_id}")
+    assert response.json()["ready_to_confirm"] is False
+    response = client.post(
+        f"/api/drafts/{draft_id}/confirm",
+        json={"expected_version": 1},
+        headers=headers,
+    )
+    assert response.status_code == 409
+    assert "still being generated" in response.json()["detail"]
 
 
 def test_spa_apis_cover_draft_note_archive_and_permanent_delete(web_app) -> None:

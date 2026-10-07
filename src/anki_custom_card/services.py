@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import suppress
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -6,7 +7,7 @@ from uuid import uuid4
 from sqlalchemy.orm import sessionmaker
 
 from anki_custom_card.config import Settings
-from anki_custom_card.deletion import NoteDeletionService
+from anki_custom_card.deletion import GenerationDeletionService, NoteDeletionService
 from anki_custom_card.generation.pipeline import GenerationPipeline
 from anki_custom_card.generation.speech import SpeechGenerationService
 from anki_custom_card.integrations.ai.factory import build_openai_generation
@@ -15,10 +16,12 @@ from anki_custom_card.integrations.tts.factory import build_azure_speech
 from anki_custom_card.media.store import ContentAddressedMediaStore
 from anki_custom_card.persistence.database import build_engine
 from anki_custom_card.persistence.job_repository import JobRepository
-from anki_custom_card.persistence.models import Job
+from anki_custom_card.persistence.models import GenerationJob, Job
 from anki_custom_card.publishing.inspection import AnkiInspectionService
 from anki_custom_card.publishing.jobs import PublicationJobHandler
 from anki_custom_card.publishing.service import PublicationService
+
+logger = logging.getLogger(__name__)
 
 
 class ApplicationServices:
@@ -29,6 +32,7 @@ class ApplicationServices:
         self.engine = build_engine(settings.database_url)
         self.sessions = sessionmaker(self.engine, expire_on_commit=False)
         self.media_store = ContentAddressedMediaStore(data_dir / "media")
+        self.generation_deletion = GenerationDeletionService(self.sessions, self.media_store)
         self.note_deletion = NoteDeletionService(self.sessions, self.media_store)
         self.anki = build_anki_connect_client(settings)
         self.publication = PublicationService(
@@ -47,7 +51,7 @@ class ApplicationServices:
                 self.azure = build_azure_speech(settings)
                 speech = SpeechGenerationService(self.sessions, self.media_store, self.azure)
             self.generation = GenerationPipeline(self.sessions, dictionary, composer, speech)
-        self.worker = PersistentWorker(self)
+        self.worker = WorkerPool(self, settings.worker_count)
 
     async def close(self) -> None:
         await self.worker.stop()
@@ -130,7 +134,7 @@ class PersistentWorker:
         with self.services.sessions.begin() as session:
             job = session.get(Job, job_id)
             attempt = job.attempts if job is not None else 1
-            JobRepository(session).fail(
+            failed_job = JobRepository(session).fail(
                 job_id,
                 worker_id=self.worker_id,
                 error=str(error),
@@ -138,10 +142,20 @@ class PersistentWorker:
                 now=now,
                 retryable=retryable,
             )
+            if job is not None and job.job_type == "generate":
+                generation = session.get(GenerationJob, job.aggregate_id)
+                if generation is not None and failed_job.status == "pending":
+                    generation.status = "pending"
+                    generation.finished_at = None
 
     async def _loop(self) -> None:
         while True:
-            worked = await self.run_once()
+            try:
+                worked = await self.run_once()
+            except Exception:
+                logger.exception("Worker job failed outside its handler")
+                await asyncio.sleep(self.services.settings.worker_poll_seconds)
+                continue
             if worked:
                 continue
             self._wake.clear()
@@ -149,3 +163,21 @@ class PersistentWorker:
                 await asyncio.wait_for(
                     self._wake.wait(), timeout=self.services.settings.worker_poll_seconds
                 )
+
+
+class WorkerPool:
+    """Run independent job consumers against the same persistent queue."""
+
+    def __init__(self, services: ApplicationServices, count: int) -> None:
+        self.workers = [PersistentWorker(services) for _ in range(count)]
+
+    def start(self) -> None:
+        for worker in self.workers:
+            worker.start()
+
+    def notify(self) -> None:
+        for worker in self.workers:
+            worker.notify()
+
+    async def stop(self) -> None:
+        await asyncio.gather(*(worker.stop() for worker in self.workers))

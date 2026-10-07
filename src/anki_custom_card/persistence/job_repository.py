@@ -92,6 +92,7 @@ class JobRepository:
                 locked_by=None,
                 locked_at=None,
                 lease_expires_at=None,
+                last_error=None,
                 updated_at=now,
             )
             .execution_options(synchronize_session=False)

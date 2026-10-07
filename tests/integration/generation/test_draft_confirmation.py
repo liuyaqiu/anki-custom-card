@@ -56,6 +56,7 @@ def test_draft_edit_uses_optimistic_version_and_confirmation_is_atomic(tmp_path:
     store = ContentAddressedMediaStore(tmp_path / "media")
     with Session(engine) as session:
         job = GenerationRepository(session).create_job("deployment", "en", now=now)
+        job.status = "succeeded"
         draft = DraftRepository(session).create(job.id, draft_content())
         media_repository = MediaRepository(session, store)
         word_audio = media_repository.add(
@@ -125,6 +126,7 @@ def test_confirming_regenerated_draft_updates_existing_note(tmp_path: Path) -> N
             )
         )
         job = GenerationRepository(session).create_job("deployment", "en", now=now)
+        job.status = "succeeded"
         job.source_note_id = note.id
         draft = DraftRepository(session).create(
             job.id, draft_content("The deployment completed without downtime.")
@@ -145,4 +147,41 @@ def test_confirming_regenerated_draft_updates_existing_note(tmp_path: Path) -> N
         assert session.get(NoteRevision, (note.id, 2)) is not None
         publish_job = session.scalar(select(Job).where(Job.aggregate_id == note.id))
         assert publish_job is not None and publish_job.target_version == 2
+    engine.dispose()
+
+
+def test_confirm_waits_for_own_generation_but_not_other_candidates(tmp_path: Path) -> None:
+    engine = build_engine(f"sqlite:///{tmp_path / 'candidate-timing.db'}")
+    Base.metadata.create_all(engine)
+    now = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
+    with Session(engine) as session:
+        candidate = GenerationRepository(session).create_job("deployment", "en", now=now)
+        candidate.status = "succeeded"
+        draft = DraftRepository(session).create(candidate.id, draft_content())
+        own_job = Job(
+            job_type="generate",
+            aggregate_id=candidate.id,
+            status="running",
+            available_at=now,
+        )
+        other = GenerationRepository(session).create_job("deployment", "en", now=now)
+        other_job = Job(
+            job_type="generate",
+            aggregate_id=other.id,
+            status="pending",
+            available_at=now,
+        )
+        session.add_all([own_job, other_job])
+        session.commit()
+
+        with pytest.raises(DraftConflictError, match="still being generated"):
+            DraftRepository(session).confirm(draft.id, expected_version=1, domain="it", now=now)
+        session.rollback()
+
+        own_job.status = "succeeded"
+        session.commit()
+        note = DraftRepository(session).confirm(draft.id, expected_version=1, domain="it", now=now)
+        session.commit()
+        assert note.word_idx == 0
+        assert other_job.status == "pending"
     engine.dispose()

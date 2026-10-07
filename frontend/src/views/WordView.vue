@@ -23,6 +23,16 @@ const regenerate = useMutation({
   mutationFn: () => api.regenerateWord(word.value),
   onSuccess: () => queryClient.invalidateQueries({ queryKey: ['word', word.value] }),
 })
+const removeGeneration = useMutation({
+  mutationFn: (id: string) => api.deleteGeneration(id),
+  onSuccess: () => queryClient.invalidateQueries({ queryKey: ['word', word.value] }),
+})
+
+function deleteGeneration(id: string) {
+  if (window.confirm('确定要删除这个生成候选及其草稿吗？此操作无法撤销。')) {
+    removeGeneration.mutate(id)
+  }
+}
 </script>
 
 <template>
@@ -46,10 +56,14 @@ const regenerate = useMutation({
     <h2>生成任务</h2>
     <div v-for="generation in query.data.value?.generations" :key="generation.id" class="task-row">
       <span>候选 idx {{ generation.word_idx }} <span :class="['badge', generation.status]">{{ generation.status }}</span></span>
-      <RouterLink v-if="generation.draft_id" :to="`/drafts/${generation.draft_id}`" class="button secondary">预览并确认草稿</RouterLink>
-      <span v-else-if="shouldPollGeneration(generation)" class="pulse">处理中</span>
-      <span v-else-if="generation.error_message" class="error">{{ generation.error_message }}</span>
+      <div class="actions">
+        <RouterLink v-if="generation.draft_id" :to="`/drafts/${generation.draft_id}`" class="button secondary">预览并确认草稿</RouterLink>
+        <button v-if="generation.status !== 'running'" class="danger" :disabled="removeGeneration.isPending.value" @click="deleteGeneration(generation.id)">删除</button>
+        <span v-if="shouldPollGeneration(generation)" class="pulse">处理中</span>
+      </div>
+      <span v-if="generation.error_message" class="error">{{ generation.error_message }}</span>
     </div>
+    <p v-if="removeGeneration.error.value" class="error">{{ removeGeneration.error.value.message }}</p>
     <p v-if="!query.data.value?.generations.length" class="muted">暂无生成任务。</p>
   </section>
 </template>

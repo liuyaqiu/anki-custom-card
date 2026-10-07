@@ -76,6 +76,10 @@ export interface CardDraft {
 
 export interface Draft {
   id: string
+  generation_id: string
+  generation_status: TaskStatus
+  generation_job_active: boolean
+  ready_to_confirm: boolean
   status: string
   version: number
   content: CardDraft

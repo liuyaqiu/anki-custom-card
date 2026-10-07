@@ -107,10 +107,7 @@ class GenerationRepository:
         )
         self.session.add(draft)
         job = self.get_job(job_id)
-        job.status = "succeeded"
-        job.error_code = None
-        job.error_message = None
-        job.finished_at = now
+        job.status = "running"
         self.session.flush()
         return draft
 

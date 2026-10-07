@@ -55,7 +55,7 @@ local database -> Anki
 - 缓存获得授权的词典 API 原始数据，并以词典事实约束 AI 生成结果。
 - 使用 GPT-5.6 Luna 生成结构化文本草稿，使用 Azure AI Speech 生成音频。
 - 保存 AI、词典和 TTS 调用产生的原始 artifacts。
-- 草稿预览、人工编辑与确认。
+- 草稿预览、人工编辑、删除与确认。
 - Note 浏览、修改、归档、彻底删除和重新生成。
 - 使用 SQLite 保存 Note、版本、生成记录和发布状态。
 - 使用本地文件保存音频等媒体资源。
@@ -75,6 +75,8 @@ make run
 Vue SPA 位于 <http://127.0.0.1:8000/app/>，访问根路径会自动跳转到该地址。Jinja/HTMX 界面及其依赖已经删除；历史 `/ui/...` 地址只用于把旧书签重定向到 SPA。一次输入默认生成三个不同语义或应用场景的候选 Note，并按词汇聚合浏览；目录会立即显示尚在生成中的词，进入词汇后可按 `word_idx` 切换。SPA 原生支持草稿编辑与确认、Note 编辑、卡片正反面渲染预览、重新生成、发布、检查、归档、彻底删除和失败任务重试。首页的“同步卡片模板到 Anki”操作可显式将当前版本的 HTML/CSS 更新到服务专用 Note Type。
 
 SPA 在 generation、publish、inspect 和 archive 运行期间自动轮询，任务进入终态后刷新相关缓存并停止轮询。
+
+后台任务由 `ACC_WORKER_COUNT` 个独立执行循环处理。直接运行 `make run` 时默认 1 个；Docker Compose 默认 3 个，可在 `.env` 中设置 `ACC_WORKER_COUNT` 调整。三个 worker 可同时等待 OpenAI、语音和 AnkiConnect 调用，SQLite 写入仍会串行处理。Docker 默认使用 600 秒任务租约，可通过 `ACC_WORKER_LEASE_SECONDS` 调整。Web 服务仍只启动一个 Uvicorn 进程，因此 worker 总数就是配置值。
 
 内容优先采用真实的 IT 与职场语境，同时兼顾重要的一般用法。生成请求使用数据库唯一请求键保证多进程幂等，重复提交会复用已有任务。所有英文内容、IPA 和 Azure Speech 音频统一使用美式英语。
 

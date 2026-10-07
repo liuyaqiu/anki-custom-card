@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
@@ -114,6 +115,85 @@ class FailingDictionaryProvider(FakeDictionaryProvider):
     async def lookup(self, query: DictionaryQuery) -> GeneratedOutput[DictionaryOutput]:
         self.calls += 1
         raise RuntimeError("dictionary unavailable")
+
+
+@pytest.mark.anyio
+async def test_concurrent_candidates_share_one_dictionary_lookup(engine: Engine) -> None:
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 7, 19, 11, 0, tzinfo=UTC)
+    with sessions.begin() as session:
+        generation_ids = [
+            GenerationRepository(session).create_job("deployment", "en", now=now).id
+            for _ in range(2)
+        ]
+
+    class SlowDictionaryProvider(FakeDictionaryProvider):
+        async def lookup(self, query: DictionaryQuery) -> GeneratedOutput[DictionaryOutput]:
+            await asyncio.sleep(0.01)
+            return await super().lookup(query)
+
+    dictionary = SlowDictionaryProvider()
+    composer = FlakyCardComposer()
+    composer.calls = 1
+    pipeline = GenerationPipeline(sessions, dictionary, composer)
+    await asyncio.gather(
+        *(pipeline.run(job_id, word_idx=0, domain="it", now=now) for job_id in generation_ids)
+    )
+    assert dictionary.calls == 1
+
+
+@pytest.mark.anyio
+async def test_generation_stays_running_until_speech_finishes(engine: Engine) -> None:
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 7, 19, 11, 0, tzinfo=UTC)
+    with sessions.begin() as session:
+        job = GenerationRepository(session).create_job("deployment", "en", now=now)
+        job_id = job.id
+
+    class ObservingSpeech:
+        async def generate(self, generation_id, usage, text, *, now):
+            with sessions() as session:
+                assert session.get(GenerationJob, generation_id).status == "running"  # type: ignore[union-attr]
+            return "audio-id"
+
+    composer = FlakyCardComposer()
+    composer.calls = 1
+    pipeline = GenerationPipeline(sessions, FakeDictionaryProvider(), composer, ObservingSpeech())
+    await pipeline.run(job_id, word_idx=0, domain="it", now=now)
+
+    with sessions() as session:
+        assert session.get(GenerationJob, job_id).status == "succeeded"  # type: ignore[union-attr]
+
+
+@pytest.mark.anyio
+async def test_speech_retry_restores_running_status_before_succeeding(engine: Engine) -> None:
+    sessions = sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 7, 19, 11, 0, tzinfo=UTC)
+    with sessions.begin() as session:
+        job_id = GenerationRepository(session).create_job("deployment", "en", now=now).id
+
+    class FlakySpeech:
+        calls = 0
+
+        async def generate(self, generation_id, usage, text, *, now):
+            with sessions() as session:
+                assert session.get(GenerationJob, generation_id).status == "running"  # type: ignore[union-attr]
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("temporary speech outage")
+            return "audio-id"
+
+    composer = FlakyCardComposer()
+    composer.calls = 1
+    speech = FlakySpeech()
+    pipeline = GenerationPipeline(sessions, FakeDictionaryProvider(), composer, speech)
+    with pytest.raises(RuntimeError, match="temporary speech outage"):
+        await pipeline.run(job_id, word_idx=0, domain="it", now=now)
+    with sessions() as session:
+        assert session.get(GenerationJob, job_id).status == "failed"  # type: ignore[union-attr]
+    await pipeline.run(job_id, word_idx=0, domain="it", now=now)
+    with sessions() as session:
+        assert session.get(GenerationJob, job_id).status == "succeeded"  # type: ignore[union-attr]
 
 
 @pytest.mark.anyio

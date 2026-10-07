@@ -5,7 +5,10 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 
-from anki_custom_card.deletion import ArchivedNoteRequiredError
+from anki_custom_card.deletion import (
+    ArchivedNoteRequiredError,
+    GenerationDeletionConflictError,
+)
 from anki_custom_card.domain.notes import NoteUpdate
 from anki_custom_card.domain.words import normalize_english_word
 from anki_custom_card.generation.commands import (
@@ -13,7 +16,7 @@ from anki_custom_card.generation.commands import (
     request_word_generation,
 )
 from anki_custom_card.generation.schemas import CardDraft
-from anki_custom_card.persistence.draft_repository import DraftRepository
+from anki_custom_card.persistence.draft_repository import DraftConflictError, DraftRepository
 from anki_custom_card.persistence.generation_repository import GenerationRepository
 from anki_custom_card.persistence.job_repository import JobRepository
 from anki_custom_card.persistence.models import Draft, GenerationJob, Job, Media, Note, NoteMedia
@@ -88,6 +91,27 @@ def generation_data(job: GenerationJob) -> dict[str, Any]:
     }
 
 
+def draft_data(session, draft: Draft) -> dict[str, Any]:
+    active_generation = session.scalar(
+        select(Job.id).where(
+            Job.job_type == "generate",
+            Job.aggregate_id == draft.generation_job_id,
+            Job.status.in_(("pending", "running")),
+        )
+    )
+    generation_status = draft.generation_job.status
+    return {
+        "id": draft.id,
+        "generation_id": draft.generation_job_id,
+        "generation_status": generation_status,
+        "generation_job_active": active_generation is not None,
+        "ready_to_confirm": generation_status == "succeeded" and active_generation is None,
+        "status": draft.status,
+        "version": draft.version,
+        "content": draft.content,
+    }
+
+
 def note_data(note: Note) -> dict[str, Any]:
     publication = note.publication
     return {
@@ -137,18 +161,26 @@ def get_generation(generation_id: str, app: AppServices):
         return generation_data(job)
 
 
+@router.delete(
+    "/generations/{generation_id}", status_code=204, dependencies=[Depends(require_csrf)]
+)
+def delete_generation(generation_id: str, app: AppServices) -> Response:
+    try:
+        app.generation_deletion.delete(generation_id)
+    except NoteNotFoundError as error:
+        raise HTTPException(404, "generation not found") from error
+    except GenerationDeletionConflictError as error:
+        raise HTTPException(409, str(error)) from error
+    return Response(status_code=204)
+
+
 @router.get("/drafts/{draft_id}")
 def get_draft(draft_id: str, app: AppServices):
     with app.sessions() as session:
         draft = session.get(Draft, draft_id)
         if draft is None:
             raise HTTPException(404, "draft not found")
-        return {
-            "id": draft.id,
-            "status": draft.status,
-            "version": draft.version,
-            "content": draft.content,
-        }
+        return draft_data(session, draft)
 
 
 @router.patch("/drafts/{draft_id}", dependencies=[Depends(require_csrf)])
@@ -159,15 +191,13 @@ def update_draft(
     app: AppServices,
 ):
     with app.sessions.begin() as session:
-        draft = DraftRepository(session).update(
-            draft_id, expected_version=expected_version, content=content
-        )
-        return {
-            "id": draft.id,
-            "status": draft.status,
-            "version": draft.version,
-            "content": draft.content,
-        }
+        try:
+            draft = DraftRepository(session).update(
+                draft_id, expected_version=expected_version, content=content
+            )
+        except DraftConflictError as error:
+            raise HTTPException(409, str(error)) from error
+        return draft_data(session, draft)
 
 
 @router.post("/drafts/{draft_id}/confirm", dependencies=[Depends(require_csrf)])
@@ -177,13 +207,16 @@ def confirm_draft(
     app: AppServices,
 ):
     with app.sessions.begin() as session:
-        note = DraftRepository(session).confirm(
-            draft_id,
-            expected_version=payload.expected_version,
-            expected_note_version=payload.expected_note_version,
-            domain=None,
-            now=datetime.now(UTC),
-        )
+        try:
+            note = DraftRepository(session).confirm(
+                draft_id,
+                expected_version=payload.expected_version,
+                expected_note_version=payload.expected_note_version,
+                domain=None,
+                now=datetime.now(UTC),
+            )
+        except DraftConflictError as error:
+            raise HTTPException(409, str(error)) from error
         result = note_data(note)
     app.worker.notify()
     return result

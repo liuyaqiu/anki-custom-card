@@ -72,6 +72,8 @@ docker compose up -d app
 
 归档删除失败时 Note 保持 `archive_pending`，在 Anki 确认副本不存在前不得硬删除本地 tombstone。
 
+Docker Compose 默认在一个 Web 进程内启动 3 个后台 worker。通过 `.env` 的 `ACC_WORKER_COUNT` 调整并执行 `docker compose up -d --build app` 后生效。每个 worker 使用独立的任务领取 ID；SQLite 原子领取避免同一个有效任务同时由两个 worker 执行。并发数提高会增加同时发往 OpenAI、Azure Speech 和 AnkiConnect 的请求数；如服务端限流或 SQLite 锁等待增多，可调低并发数。
+
 ## Docker 与本机 Anki
 
 Compose 的应用服务使用 host network，默认监听 `127.0.0.1`。这是因为 AnkiConnect 默认只监听本机 loopback；普通容器 bridge 网络无法安全访问宿主机的 `127.0.0.1:8765`。需要从可信局域网访问 Web 服务时，可在 `.env` 设置宿主机的明确私网地址，例如 `ACC_HOST=192.168.88.9`，然后重新创建容器。Web 监听地址和 `ACC_ANKI_CONNECT_URL` 相互独立，后者仍保持 loopback。

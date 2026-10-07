@@ -159,6 +159,28 @@ def test_failed_job_is_retried_then_becomes_terminal(engine: Engine) -> None:
         assert terminal.last_error == "Anki unavailable"
 
 
+def test_successful_retry_clears_previous_error(engine: Engine) -> None:
+    now = datetime(2026, 7, 19, 9, 0, tzinfo=UTC)
+    with Session(engine) as session:
+        repository = JobRepository(session)
+        job = repository.enqueue(job_type="generate", aggregate_id="generation-1", now=now)
+        session.commit()
+        repository.claim("worker", now, timedelta(seconds=30))
+        repository.fail(
+            job.id,
+            worker_id="worker",
+            error="Connection error.",
+            retry_at=now + timedelta(seconds=5),
+            now=now,
+        )
+        retried = repository.claim("worker", now + timedelta(seconds=5), timedelta(seconds=30))
+        assert retried is not None
+        completed = repository.complete(job.id, worker_id="worker", now=now + timedelta(seconds=5))
+        session.commit()
+        assert completed.status == "succeeded"
+        assert completed.last_error is None
+
+
 def test_failed_job_can_be_manually_retried(engine: Engine) -> None:
     now = datetime(2026, 7, 19, 12, 0, tzinfo=UTC)
     with Session(engine) as session:
